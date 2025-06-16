@@ -1,0 +1,79 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Guia do Desenvolvedor – Astrologer API
+
+## 1. Instruções de Configuração
+
+1. Clone o repositório e navegue até a pasta raiz.
+2. Crie um ambiente virtual Python 3.11+:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+3. Instale dependências de produção e desenvolvimento:
+   ```bash
+   pip install -r <(pipenv lock --requirements --dev)
+   ```
+   > Dica: você pode usar **uv** para builds mais rápidos.
+4. Defina variáveis de ambiente essenciais:
+   ```bash
+   export ENV_TYPE=dev               # dev | production | test
+   export RAPID_API_SECRET_KEY="<sua-chave>"
+   export GEONAMES_USERNAME="<user>"  # opcional para coordenadas automáticas
+   ```
+5. Inicie o servidor local:
+   ```bash
+   pipenv run dev          # `uvicorn app.main:app --reload`
+   ```
+
+## 2. Visão Geral da Estrutura do Projeto
+
+| Camada            | Descrição | Arquivos principais |
+|-------------------|-----------|---------------------|
+| Config            | Carrega configurações via **toml** e variáveis de ambiente | [`app/config/settings.py`](mdc:app/config/settings.py) |
+| Middleware        | Middleware ASGI customizados | [`app/middleware/secret_key_checker_middleware.py`](mdc:app/middleware/secret_key_checker_middleware.py) |
+| Routers/Endpoints | Implementação dos endpoints REST | [`app/routers/main_router.py`](mdc:app/routers/main_router.py) |
+| Modelos           | Schemas Pydantic para request/response | [`app/types/request_models.py`](mdc:app/types/request_models.py), [`app/types/response_models.py`](mdc:app/types/response_models.py) |
+| Utils             | Funções auxiliares (hora NTP, logs, etc.) | [`app/utils`](mdc:app/utils) |
+| Raiz              | Bootstrap FastAPI | [`app/main.py`](mdc:app/main.py) |
+
+## 3. Fluxo de Trabalho de Desenvolvimento
+
+1. **Crie uma branch** a partir de `main`.
+2. **Adicione/edite código** seguindo o estilo Black (`pipenv run format`).
+3. **Rode testes**:
+   ```bash
+   pipenv run test-verbose
+   ```
+4. **Execute linter/mypy**:
+   ```bash
+   pipenv run quality
+   ```
+5. Abra um PR, descrevendo mudanças, referências e capturas de tela (se aplicável).
+
+## 4. Abordagem de Teste
+
+- Framework: **pytest** + **TestClient** do FastAPI.
+- Cobertura principal: status endpoint, cálculo de datas, geração de charts, relationship score.
+- Arquivos de teste: [`tests/test_main.py`](mdc:tests/test_main.py).
+- Para rodar apenas um teste:
+  ```bash
+  pytest tests/test_main.py::test_birth_data -vv
+  ```
+- Use **pytest-cov** (opcional) para análise de cobertura.
+
+## 5. Etapas Comuns de Solução de Problemas
+
+| Sintoma | Possível causa | Correção |
+|---------|----------------|----------|
+| `422 Validation Error` | JSON malformado ou campos inválidos | Verifique schema em [`openapi.json`](mdc:openapi.json). |
+| `400 Bad request` via middleware | Header `X-RapidAPI-Proxy-Secret` ausente | Inclua header ou desative middleware em `ENV_TYPE=dev`. |
+| "City/Nation name error" | Falha no GeoNames | Confirme `GEONAMES_USERNAME` ou forneça lat/lng/tz manualmente. |
+| Time incorreto em `/now` | Falha na API Google Time | Verifique conexão ou use NTP (`app/utils/get_ntp_time.py`). |
+| `externally-managed-environment` ao instalar pacotes | Instalação global bloqueada pelo Homebrew | Use ambiente virtual ou `--break-system-packages`. |
+
+---
+Este guia serve como referência rápida para onboarding e manutenção contínua do projeto.

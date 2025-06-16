@@ -1,0 +1,36 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Dependências e Documentação
+
+## Pinned requirements
+O projeto utiliza dependências congeladas em [requirements.txt](mdc:requirements.txt). Sempre que adicionar ou remover pacotes:
+
+1. Ative o *venv* e execute `pip freeze > requirements.txt`.
+2. Valide com `pip-audit` para garantir ausência de vulnerabilidades.
+3. Faça *commit* do novo arquivo.
+
+> Dica: utilize o script `pipenv lock --requirements --dev` para gerar variantes se preferir.
+
+## Padrão de Documentação
+Todo novo módulo, classe ou função **deve** conter docstring no padrão *Google*:
+
+```python
+def example(param1: int, param2: str) -> str:
+    """Breve descrição em uma linha.
+
+    Args:
+        param1: Explicação do parâmetro.
+        param2: Explicação do parâmetro.
+
+    Returns:
+        str: Explicação do retorno.
+    """
+    ...
+```
+
+- Para módulos existentes sem docstring, abra um PR adicionando a documentação.
+- Utilize *type hints* para todas as assinaturas públicas.
+- Gere documentação automática com `pydoc-markdown` (futuro).
