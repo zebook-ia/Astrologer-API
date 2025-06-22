@@ -11,10 +11,13 @@ from kerykeion import (
     CompositeSubjectFactory
 )
 from kerykeion.settings.config_constants import DEFAULT_ACTIVE_POINTS, DEFAULT_ACTIVE_ASPECTS
+from cachetools import LRUCache, cached
+from cachetools.keys import hashkey
+import json # Para serializar dicts para chaves de cache
 
 # Local
 from ..utils.internal_server_error_json_response import InternalServerErrorJsonResponse
-from ..utils.get_time_from_google import get_time_from_google
+from ..utils.get_ntp_time import get_ntp_time # Alterado de get_time_from_google
 from ..utils.write_request_to_log import get_write_request_to_log
 from ..types.request_models import (
     BirthDataRequestModel,
@@ -44,6 +47,35 @@ write_request_to_log = get_write_request_to_log(logger)
 router = APIRouter()
 
 GEONAMES_ERROR_MESSAGE = "City/Nation name error or invalid GeoNames username. Please check your username or city name and try again. You can create a free username here: https://www.geonames.org/login/. If you want to bypass the usage of GeoNames, please remove the geonames_username field from the request. Note: The nation field should be the country code (e.g. US, UK, FR, DE, etc.)."
+
+# Configuração do Cache LRU
+# Cache para resultados de geonames (assumindo que AstrologicalSubject pode fazer chamadas externas)
+geonames_cache = LRUCache(maxsize=100)
+# Cache para SVGs e dados de mapas
+chart_cache = LRUCache(maxsize=50)
+# Cache para dados de aspectos
+aspect_data_cache = LRUCache(maxsize=50)
+
+# Função para criar chaves de cache a partir de modelos Pydantic ou dicts
+def make_cache_key(*args, **kwargs):
+    key_parts = []
+    for arg in args:
+        if hasattr(arg, 'model_dump_json'):
+            key_parts.append(arg.model_dump_json(exclude_none=True, sort_keys=True))
+        elif isinstance(arg, dict):
+            key_parts.append(json.dumps(arg, sort_keys=True))
+        else:
+            key_parts.append(str(arg))
+
+    for k, v in sorted(kwargs.items()):
+        if hasattr(v, 'model_dump_json'):
+            key_parts.append(f"{k}:{v.model_dump_json(exclude_none=True, sort_keys=True)}")
+        elif isinstance(v, dict):
+            key_parts.append(f"{k}:{json.dumps(v, sort_keys=True)}")
+        else:
+            key_parts.append(f"{k}:{str(v)}")
+
+    return hashkey(":".join(key_parts))
 
 @router.get("/api/v4/health", response_description="Health check", include_in_schema=False)
 async def health(request: Request) -> JSONResponse:
@@ -85,7 +117,7 @@ async def get_now(request: Request) -> JSONResponse:
     
     logger.debug("Getting current UTC time from the time API")
     try:
-        utc_datetime = get_time_from_google()
+        utc_datetime = get_ntp_time() # Alterado de get_time_from_google
         datetime_dict = {
             "year": utc_datetime.year, # type: ignore
             "month": utc_datetime.month, # type: ignore
@@ -125,6 +157,7 @@ async def get_now(request: Request) -> JSONResponse:
 
 
 @router.post("/api/v4/birth-data", response_description="Birth data", response_model=BirthDataResponseModel)
+@cached(geonames_cache, key=make_cache_key)
 async def birth_data(birth_data_request: BirthDataRequestModel, request: Request):
     """
     Retrieve astrological data for a specific birth date. Does not include the chart nor the aspects.
@@ -177,6 +210,7 @@ async def birth_data(birth_data_request: BirthDataRequestModel, request: Request
 
 
 @router.post("/api/v4/birth-chart", response_description="Birth chart", response_model=BirthChartResponseModel)
+@cached(chart_cache, key=make_cache_key)
 async def birth_chart(request_body: BirthChartRequestModel, request: Request):
     """
     Retrieve an astrological birth chart for a specific birth date. Includes the data for the subject and the aspects.
@@ -249,6 +283,7 @@ async def birth_chart(request_body: BirthChartRequestModel, request: Request):
 
 
 @router.post("/api/v4/synastry-chart", response_description="Synastry data", response_model=SynastryChartResponseModel)
+@cached(chart_cache, key=make_cache_key)
 async def synastry_chart(synastry_chart_request: SynastryChartRequestModel, request: Request):
     """
     Retrieve a synastry chart between two subjects. Includes the data for the subjects and the aspects.
@@ -344,6 +379,7 @@ async def synastry_chart(synastry_chart_request: SynastryChartRequestModel, requ
 
 
 @router.post("/api/v4/transit-chart", response_description="Transit data", response_model=TransitChartResponseModel)
+@cached(chart_cache, key=make_cache_key)
 async def transit_chart(transit_chart_request: TransitChartRequestModel, request: Request):
     """
     Retrieve a transit chart for a specific subject. Includes the data for the subject and the aspects.
@@ -439,6 +475,7 @@ async def transit_chart(transit_chart_request: TransitChartRequestModel, request
 
 
 @router.post("/api/v4/transit-aspects-data", response_description="Transit aspects data", response_model=TransitAspectsResponseModel)
+@cached(aspect_data_cache, key=make_cache_key)
 async def transit_aspects_data(transit_chart_request: TransitChartRequestModel, request: Request) -> JSONResponse:
     """
     Retrieve transit aspects and data for a specific subject. Does not include the chart.
@@ -525,6 +562,7 @@ async def transit_aspects_data(transit_chart_request: TransitChartRequestModel, 
 
 
 @router.post("/api/v4/synastry-aspects-data", response_description="Synastry aspects data", response_model=SynastryAspectsResponseModel)
+@cached(aspect_data_cache, key=make_cache_key)
 async def synastry_aspects_data(aspects_request_content: SynastryAspectsRequestModel, request: Request) -> JSONResponse:
     """
     Retrieve synastry aspects between two subjects. Does not include the chart.
@@ -611,6 +649,7 @@ async def synastry_aspects_data(aspects_request_content: SynastryAspectsRequestM
 
 
 @router.post("/api/v4/natal-aspects-data", response_description="Birth aspects data", response_model=SynastryAspectsResponseModel)
+@cached(aspect_data_cache, key=make_cache_key)
 async def natal_aspects_data(aspects_request_content: NatalAspectsRequestModel, request: Request) -> JSONResponse:
     """
     Retrieve natal aspects and data for a specific subject. Does not include the chart.
@@ -672,6 +711,7 @@ async def natal_aspects_data(aspects_request_content: NatalAspectsRequestModel, 
 
 
 @router.post("/api/v4/relationship-score", response_description="Relationship score", response_model=RelationshipScoreResponseModel)
+@cached(aspect_data_cache, key=make_cache_key) # Usando aspect_data_cache, mas poderia ser um cache dedicado se necessário
 async def relationship_score(relationship_score_request: RelationshipScoreRequestModel, request: Request) -> JSONResponse:
     """
     Calculates the relevance of the relationship between two subjects using the Ciro Discepolo method.
@@ -766,6 +806,7 @@ async def relationship_score(relationship_score_request: RelationshipScoreReques
 
 
 @router.post("/api/v4/composite-chart", response_description="Composite data", response_model=CompositeChartResponseModel)
+@cached(chart_cache, key=make_cache_key)
 async def composite_chart(composite_chart_request: CompositeChartRequestModel, request: Request) -> JSONResponse:
     """
     Retrieve a composite chart between two subjects. Includes the data for the subjects and the aspects.
@@ -867,6 +908,7 @@ async def composite_chart(composite_chart_request: CompositeChartRequestModel, r
 
 
 @router.post("/api/v4/composite-aspects-data", response_description="Composite aspects data", response_model=CompositeAspectsResponseModel)
+@cached(aspect_data_cache, key=make_cache_key)
 async def composite_aspects_data(composite_chart_request: CompositeChartRequestModel, request: Request) -> JSONResponse:
     """
     Retrieves the data and the aspects for a composite chart between two subjects. Does not include the chart.
